@@ -1,3 +1,5 @@
+import { execFile } from "child_process";
+import { promisify } from "util";
 import { ProxyAgent, setGlobalDispatcher } from "undici";
 import { EdgeBookmarkReader } from "@/utils/edge-bookmark";
 import { TaskQueue } from "@/utils/task-queue";
@@ -6,11 +8,15 @@ import type { LiveBookmarkRow, LiveRoomStatus } from "./types";
 import {
   LIVE_BOOKMARK_PROCESS_INTERVAL_MS,
   LIVE_FOLDER_NAME,
+  LIVE_NOTIFY_APP_ID,
   LIVE_PROXY_URL,
   LIVE_REQUEST_COOKIE,
   LIVE_REQUEST_HEADERS,
   LIVE_SCRAPE_INTERVAL_MS,
 } from "./constants";
+
+/** 以 Promise 形式调用 powershell，便于在异步流程中 await / 静默吞掉通知失败。 */
+const execFileAsync = promisify(execFile);
 
 /** fetch 返回对象的结构化类型（避免依赖全局 Response 类型声明差异）。 */
 interface FetchResponse {
@@ -68,6 +74,18 @@ export class LiveStatusService {
   /** 停止服务：停止任务队列调度。 */
   stop(): void {
     this.queue.stop();
+  }
+
+  /**
+   * 直播间在线状态发生切换（在线↔离线）时，弹出 Windows 原生通知。
+   * 仅在成功抓取且状态真正变化时调用，获取失败 / 首次抓取不会触发。
+   * @param row      发生状态切换的书签行（用于展示名称）
+   * @param nowOnline 切换后的在线状态（true=上线，false=离线）
+   */
+  private async notifyStatusChange(row: LiveBookmarkRow, nowOnline: boolean): Promise<void> {
+    const body = nowOnline ? `${row.name} 已开播（在线）` : `${row.name} 已离线`;
+    console.log(`[live] 状态切换通知：${body}`);
+    await showWindowsToast("直播间状态变更", body);
   }
 
   /**
@@ -154,6 +172,8 @@ export class LiveStatusService {
       const html = await this.fetchLiveHtml(bm.url);
       const status = parseLiveRoomStatus(html);
       if (status) {
+        // 记录变更前的在线状态，用于判断是否发生了「在线↔离线」切换。
+        const prevOnline = row.status?.isOnline;
         row.state = "fetched";
         row.status = status;
         row.fetchedAt = Date.now();
@@ -161,6 +181,10 @@ export class LiveStatusService {
         console.log(
           `[live] 书签处理成功：${row.name} | 在线=${status.isOnline} 屏蔽=${status.isBlocked} 状态="${status.offlineStatus}" 更新时间=${status.offlineStatusUpdatedAt}`,
         );
+        // 仅在「成功抓取且在线状态发生切换」时通知；失败 / 首次抓取 / 状态未变均不通知。
+        if (prevOnline !== undefined && prevOnline !== status.isOnline) {
+          void this.notifyStatusChange(row, status.isOnline);
+        }
       } else {
         row.state = "notfound";
         row.error = "页面中未找到 offlineStatusUpdatedAt";
@@ -193,6 +217,43 @@ export class LiveStatusService {
       throw new Error(`非 HTML 文档：${contentType || "unknown"}`);
     }
     return res.text();
+  }
+}
+
+/**
+ * 弹出 Windows 原生 Toast 通知（基于 Windows.UI.Notifications，无需第三方依赖）。
+ * 将整段 PowerShell 脚本以 UTF-16LE 做 Base64 编码后通过 -EncodedCommand 传入，
+ * 以规避标题 / 正文中的引号、换行等字符对命令行解析的干扰；再经 -Args 把文本传给脚本。
+ * @param title 通知标题
+ * @param body  通知正文
+ */
+export async function showWindowsToast(title: string, body: string): Promise<void> {
+  const script = `
+$ErrorActionPreference = 'SilentlyContinue'
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom, ContentType = WindowsRuntime] | Out-Null
+$template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+$texts = $template.GetElementsByTagName('text')
+$texts.Item(0).AppendChild($template.CreateTextNode($args[0])) | Out-Null
+$texts.Item(1).AppendChild($template.CreateTextNode($args[1])) | Out-Null
+$toast = [Windows.UI.Notifications.ToastNotification]::new($template)
+$notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('${LIVE_NOTIFY_APP_ID}')
+$notifier.Show($toast)
+`;
+  const encoded = Buffer.from(script, "utf16le").toString("base64");
+  try {
+    await execFileAsync("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-EncodedCommand",
+      encoded,
+      "-Args",
+      title,
+      body,
+    ]);
+  } catch (err) {
+    // 通知失败（如无桌面会话 / 权限受限）不影响主流程，仅记录日志。
+    console.error("[live] Windows 通知发送失败：", err instanceof Error ? err.message : err);
   }
 }
 

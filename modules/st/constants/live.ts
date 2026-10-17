@@ -1,4 +1,11 @@
 /** 直播书签所在目录名：读取「live」目录下的直接书签（不含子目录）。 */
+/**
+ * Windows Toast 通知的源标识（显示在通知底部，亦用于系统对该通知归类）。
+ * 桌面应用一般随意填写一个稳定字符串即可，无需真实应用清单。
+ */
+export const LIVE_NOTIFY_APP_ID = "node-home" as const;
+
+/** 直播书签所在目录名：读取「live」目录下的直接书签（不含子目录）。 */
 export const LIVE_FOLDER_NAME = "live" as const;
 
 /** 主调度间隔（毫秒）：每 30 秒重新发现一次 live 目录书签并刷新待处理队列。 */
