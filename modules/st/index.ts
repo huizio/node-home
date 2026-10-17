@@ -5,7 +5,7 @@
 
 
 function setup(){
-
+    console.log("[st] setup")
 }
 
 

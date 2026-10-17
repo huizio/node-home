@@ -4,8 +4,8 @@
   "description": "",
   "main": "index.ts",
   "scripts": {
-    "dev": "node index.ts",
-    "start": "node index.ts",
+    "dev": "tsx index.ts",
+    "start": "tsx index.ts",
     "type-check": "tsc --noEmit",
     "build": "tsc"
   },
