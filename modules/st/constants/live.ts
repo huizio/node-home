@@ -5,7 +5,7 @@ export const LIVE_FOLDER_NAME = "live" as const;
 export const LIVE_SCRAPE_INTERVAL_MS = 30000 as const;
 
 /** 单个书签处理间隔（毫秒）：任务队列每秒处理一个书签。 */
-export const LIVE_BOOKMARK_PROCESS_INTERVAL_MS = 1000 as const;
+export const LIVE_BOOKMARK_PROCESS_INTERVAL_MS = 2000 as const;
 
 /**
  * 请求直播站点时携带的请求头（模拟浏览器，避免被站点拦截）。
@@ -36,3 +36,10 @@ export const LIVE_REQUEST_HEADERS = {
  *（抓某些站点时缺少登录态可能返回非预期内容）。
  */
 export const LIVE_REQUEST_COOKIE = "" as const;
+
+/**
+ * 请求所用的代理地址。浏览器通过该本地代理访问直播站点（远程地址 127.0.0.1:10808），
+ * 而 Node 内置 fetch 默认不走系统 / 浏览器代理，会导致拿到被拦截的页面、从而找不到状态字段。
+ * 故需显式配置同源代理。可通过环境变量 LIVE_PROXY_URL 覆盖；留空则不使用代理直连。
+ */
+export const LIVE_PROXY_URL = (process.env.LIVE_PROXY_URL ?? "http://127.0.0.1:10808") as string;

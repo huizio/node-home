@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { ProxyAgent, setGlobalDispatcher } from "undici";
 import { EdgeBookmarkReader } from "@/utils/edge-bookmark";
 import { TaskQueue } from "@/utils/task-queue";
 import type { Bookmark } from "@/types";
@@ -6,6 +7,7 @@ import type { LiveBookmarkRow, LiveRoomStatus, LiveSnapshot } from "./types";
 import {
   LIVE_BOOKMARK_PROCESS_INTERVAL_MS,
   LIVE_FOLDER_NAME,
+  LIVE_PROXY_URL,
   LIVE_REQUEST_COOKIE,
   LIVE_REQUEST_HEADERS,
   LIVE_SCRAPE_INTERVAL_MS,
@@ -45,8 +47,10 @@ export class LiveStatusService {
   /** SSE 订阅者集合（每个连接对应一个 ServerResponse）。 */
   private readonly subscribers = new Set<ServerResponse>();
 
-  /** 启动服务：注册两个定时任务并开启调度。 */
+  /** 启动服务：配置代理（若设置）、注册两个定时任务并开启调度。 */
   start(): void {
+    this.setupProxy();
+
     // 主调度：每 30 秒重新发现 live 目录书签并刷新待处理队列。
     this.queue.add(
       () => {
@@ -73,6 +77,26 @@ export class LiveStatusService {
   /** 停止服务：停止任务队列调度。 */
   stop(): void {
     this.queue.stop();
+  }
+
+  /**
+   * 配置请求代理。Node 内置 fetch 默认不走系统 / 浏览器代理，而目标站点需经该本地代理
+   *（与浏览器远程地址 127.0.0.1:10808 一致）才能拿到真实页面，否则会被拦截。
+   * 设置全局 dispatcher 后，内置 fetch 会复用同一代理；未配置 LIVE_PROXY_URL 则跳过。
+   */
+  private setupProxy(): void {
+    if (!LIVE_PROXY_URL) {
+      return;
+    }
+    try {
+      setGlobalDispatcher(new ProxyAgent(LIVE_PROXY_URL));
+      console.log(`[live] 已设置请求代理：${LIVE_PROXY_URL}`);
+    } catch (err) {
+      console.error(
+        `[live] 代理配置失败（${LIVE_PROXY_URL}）：`,
+        err instanceof Error ? err.message : err,
+      );
+    }
   }
 
   /** 当前全部表格行数据（供首屏 SSR 使用）。 */
