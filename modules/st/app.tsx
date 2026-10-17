@@ -36,7 +36,7 @@ export function App({ bookmarks }: { bookmarks: Bookmark[] }): ReactNode {
               <tr key={bm.id}>
                 <td style={cellStyle}>{bm.name}</td>
                 <td style={cellStyle}>
-                  <a href={bm.url}>{bm.url}</a>
+                  <a href={bm.url} target="_blank">{bm.url}</a>
                 </td>
               </tr>
             ))}
