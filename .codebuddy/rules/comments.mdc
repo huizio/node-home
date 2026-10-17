@@ -1,0 +1,60 @@
+---
+description: 生成的代码需要写注释，但不必逐行注释；types 与 constants 目录下的定义必须注释，代码中所有方法/函数定义也必须注释
+globs: **/*.ts,**/*.tsx,**/*.vue,**/*.js,**/*.jsx
+alwaysApply: true
+---
+
+# 注释规范（Comments）
+
+## 核心规则
+
+生成的代码应当**有注释、可读**，但遵循"按需注释"原则——**不要逐行、逐变量都写注释**，只在必要处说明"为什么"和"是什么"。
+
+### 1. 必须注释的范围
+
+- **`types/` 目录下的所有定义**：每个 `interface` / `type` / 枚举类型，以及其中语义不直观的字段，必须写注释说明用途。
+  ```ts
+  /** 书签节点，既可能是文件夹也可能是具体书签（url）。 */
+  export interface BookmarkNode {
+    /** 节点唯一 id */
+    id: string;
+    /** 显示名称，文件夹即目录名，书签即标题 */
+    name: string;
+    /** 节点类型：folder=目录，url=书签 */
+    type: BookmarkNodeType;
+  }
+  ```
+- **`constants/` 目录下的所有导出**：每个常量 / 常量对象必须写注释，说明其含义与取值来源。
+  ```ts
+  /** Edge 书签文件相对 LOCALAPPDATA 的路径（Windows）。 */
+  export const EDGE_BOOKMARKS_RELATIVE_PATH = "Microsoft/Edge/User Data/Default/Bookmarks" as const;
+  ```
+- **代码中所有方法 / 函数定义**：导出的函数、类的方法、模块内关键函数，必须用注释说明**职责、参数含义、返回值**（对外 API 建议用 JSDoc 风格）。
+  ```ts
+  /**
+   * 按目录名递归收集其下所有书签（支持多级子目录）。
+   * @param folderName 目标目录名称，存在同名目录时会全部命中
+   * @returns 去重前的全部书签（含子目录中的书签）
+   */
+  async getBookmarksByFolderName(folderName: string): Promise<Bookmark[]> { ... }
+  ```
+
+### 2. 不必注释的范围
+
+- 一眼能看懂的实现细节（如简单的 `get`/`set`、明显的变量赋值）。
+- 由具名常量 / 语义化命名已经自解释的代码。
+- 普通的循环、标准库调用等无需额外说明。
+
+### 3. 注释风格
+
+- 对外导出（public API、类型、常量）：使用 `/** ... */` 文档注释，便于生成类型文档。
+- 模块内部辅助逻辑：使用 `//` 单行注释点明关键意图即可。
+- 注释讲"意图与原因"，不要复述代码本身（避免 `// 把 a 赋给 b` 这类废话）。
+- 中文注释，与项目现有规则保持一致。
+
+## 检查清单
+
+- [ ] `types/` 下每个 interface/type/枚举及其关键字段是否有注释？
+- [ ] `constants/` 下每个导出常量是否有注释说明含义/来源？
+- [ ] 代码中每个方法/函数定义是否有注释说明职责、参数、返回值？
+- [ ] 是否存在无意义的逐行/逐变量废话注释？（应删除）

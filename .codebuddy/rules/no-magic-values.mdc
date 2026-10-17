@@ -1,0 +1,91 @@
+---
+description: 禁止在代码中直接使用魔法值，所有常量必须抽取到 constants 目录下对应模块的 ts 文件中，并在 constants/index.ts 统一导出
+globs: **/*.ts,**/*.tsx,**/*.vue,**/*.js,**/*.jsx
+alwaysApply: true
+---
+
+# 禁止魔法值（No Magic Values）
+
+## 核心规则
+
+代码中**禁止直接使用魔法值**（即未经定义、凭空出现的字面量常量），必须将其抽取为语义清晰的具名常量。
+
+以下情形视为魔法值，禁止使用：
+- 数字字面量：`if (status === 1)`、`setTimeout(fn, 3000)`、`pageSize = 20`
+- 字符串字面量：`type === "admin"`、`router.push("/home")`、错误码 `"E1001"`
+- 布尔字面量被硬编码在业务判断中
+- 颜色、单位、配置项等硬编码值
+
+以下情形**允许**直接使用字面量（无需抽取）：
+- 从 `0` 开始的循环下标
+- `0` / `1` 等作为数组索引、位运算等局部语义明确的场景
+- 简单的 `length` / `length - 1` 等表达式
+- JSX / 模板中作为展示文本的纯字符串（非业务判断依据）
+
+## 存放规范
+
+1. 在 `constants/` 目录下，按**业务域 / 功能模块**新建对应的 `.ts` 模块文件。
+   - 文件名使用 `kebab-case`，例如 `user-status.ts`、`api-timeout.ts`、`error-code.ts`。
+   - 每个模块只放同一领域的常量，保持高内聚。
+2. 常量使用 `const` / `as const` 定义，并加 `export`。
+   - 推荐使用 `as const` 或 `Object.freeze` 保证不可变。
+   - 相关常量建议聚合为对象，提升可读性，例如：
+     ```ts
+     export const USER_STATUS = {
+       ACTIVE: 1,
+       DISABLED: 0,
+     } as const;
+
+     export const API_TIMEOUT = 3000 as const;
+     ```
+3. 在 `constants/index.ts` 中**统一导出**所有模块：
+   ```ts
+   export * from "./user-status";
+   export * from "./api-timeout";
+   export * from "./error-code";
+   ```
+4. 使用方通过 `import { USER_STATUS } from "@/constants"`（或项目相对路径）引入，**禁止**从子模块路径直接散落引用（除非项目另有统一约定）。
+
+## 示例
+
+❌ 错误写法（魔法值）：
+```ts
+if (user.status === 1) {
+  router.push("/dashboard");
+}
+const list = await fetchUsers({ pageSize: 20 });
+```
+
+✅ 正确写法：
+```ts
+// constants/user-status.ts
+export const USER_STATUS = {
+  ACTIVE: 1,
+  DISABLED: 0,
+} as const;
+
+// constants/route-path.ts
+export const ROUTE_PATH = {
+  DASHBOARD: "/dashboard",
+} as const;
+
+// constants/page-config.ts
+export const PAGE_CONFIG = {
+  USER_PAGE_SIZE: 20,
+} as const;
+
+// 使用处
+import { USER_STATUS, ROUTE_PATH, PAGE_CONFIG } from "@/constants";
+if (user.status === USER_STATUS.ACTIVE) {
+  router.push(ROUTE_PATH.DASHBOARD);
+}
+const list = await fetchUsers({ pageSize: PAGE_CONFIG.USER_PAGE_SIZE });
+```
+
+## 检查清单
+
+- [ ] 业务判断中的数字 / 字符串字面量是否已抽取为常量？
+- [ ] 常量是否放在 `constants/` 下对应业务模块文件中（非散落在业务代码）？
+- [ ] 常量是否已通过 `export` 暴露？
+- [ ] 新模块是否已在 `constants/index.ts` 中统一导出？
+- [ ] 使用处是否从统一入口引入？

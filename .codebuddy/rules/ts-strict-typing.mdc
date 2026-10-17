@@ -1,0 +1,78 @@
+---
+description: 项目使用 TypeScript，所有变量/函数/参数/返回值必须显式标注类型，生成代码后需检查 tsc 是否报错，类型统一在 types/index.ts 导出
+globs: **/*.ts,**/*.tsx,**/*.vue
+alwaysApply: true
+---
+
+# TypeScript 严格类型标注（TS Strict Typing）
+
+## 核心规则
+
+本项目使用 **TypeScript**，所有代码必须**显式标注类型**，禁止依赖隐式 `any` 或类型推导来"蒙混过关"。
+
+### 1. 必须标注类型的场景
+
+- 函数参数：每个参数都要有类型，禁止隐式 `any`。
+  ```ts
+  // ❌
+  function add(a, b) { return a + b; }
+  // ✅
+  function add(a: number, b: number): number { return a + b; }
+  ```
+- 函数返回值：复杂返回逻辑、异步函数、导出函数必须标注返回值类型。
+  ```ts
+  async function getUser(id: string): Promise<User | null> { ... }
+  ```
+- 变量声明：当初始化值无法让 TS 明确推导出预期类型时（如空数组、对象字面量、API 返回值），必须标注。
+  ```ts
+  const list: User[] = [];
+  const map: Record<string, number> = {};
+  ```
+- 接口 / 数据结构：所有跨模块流转的数据结构必须定义为 `interface` 或 `type`。
+- 事件回调、Promise、泛型参数等同样需要明确类型。
+
+### 2. 禁止
+
+- 禁止出现隐式 `any`（开启 `noImplicitAny`）。
+- 禁止用 `any` 绕过类型检查；确需放宽时使用 `unknown` 并做类型收窄。
+- 禁止 `@ts-ignore` / `@ts-expect-error` 掩盖真实错误（确有第三方类型缺失时，优先补充 `.d.ts` 声明）。
+
+### 3. 类型定义与导出
+
+- 所有共享类型（`interface` / `type` / 枚举类型）定义后，统一在 `types/index.ts` 导出：
+  ```ts
+  // types/user.ts
+  export interface User {
+    id: string;
+    name: string;
+  }
+
+  // types/index.ts
+  export * from "./user";
+  ```
+- 使用方从 `@/types` 统一引入类型，避免从子路径散落引用。
+- 类型文件命名使用 `kebab-case`，按业务域划分（如 `user.ts`、`api-response.ts`）。
+
+### 4. 生成代码后必须检查 TypeScript 报错
+
+完成任何代码生成 / 修改后，**必须运行类型检查**，确认无报错后方可交付：
+
+```bash
+# 在项目根目录执行（按实际工具链选择）
+npx tsc --noEmit
+# 或使用项目脚本
+npm run type-check
+```
+
+- 若 `tsc` 报错，必须自查并修复，直至零报错。
+- 修复时优先修正类型定义本身，而不是用 `any` / 注释压制。
+- 若项目尚未初始化 `tsconfig.json` / 依赖，先告知用户并补齐基础配置再检查。
+
+## 检查清单
+
+- [ ] 所有函数参数是否都有类型标注？
+- [ ] 导出 / 异步 / 复杂函数是否标注了返回值类型？
+- [ ] 是否避免了隐式 `any` 与裸 `any`？
+- [ ] 共享数据结构是否定义为 `interface` / `type`？
+- [ ] 新类型是否已通过 `types/index.ts` 统一导出、使用方从统一入口引入？
+- [ ] 生成代码后是否运行 `tsc --noEmit` 且无报错？
