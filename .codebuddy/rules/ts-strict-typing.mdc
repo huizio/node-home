@@ -1,5 +1,5 @@
 ---
-description: 项目使用 TypeScript，所有变量/函数/参数/返回值必须显式标注类型，生成代码后需检查 tsc 是否报错，类型统一在 types/index.ts 导出
+description: 项目使用 TypeScript，所有变量/函数/参数/返回值必须显式标注类型，生成代码后需检查 tsc 是否报错；公共类型统一在根 types/ 导出（从 @/types 引入），仅服务某模块的类型放 modules/<模块>/types/
 globs: **/*.ts,**/*.tsx,**/*.vue
 alwaysApply: true
 ---
@@ -39,7 +39,13 @@ alwaysApply: true
 
 ### 3. 类型定义与导出
 
-- 所有共享类型（`interface` / `type` / 枚举类型）定义后，统一在 `types/index.ts` 导出：
+类型按**作用域**分为两类，分别存放在不同位置：
+
+#### 公共类型（项目级）
+
+跨模块流转、或语义上属于整个项目的数据结构，放在**项目根目录的 `types/`** 下：
+
+- 所有公共类型（`interface` / `type` / 枚举类型）定义后，统一在 `types/index.ts` 导出：
   ```ts
   // types/user.ts
   export interface User {
@@ -50,8 +56,17 @@ alwaysApply: true
   // types/index.ts
   export * from "./user";
   ```
-- 使用方从 `@/types` 统一引入类型，避免从子路径散落引用。
+- 使用方从 `@/types` 统一引入类型，避免从子路径（如 `@/types/user`）散落引用。
 - 类型文件命名使用 `kebab-case`，按业务域划分（如 `user.ts`、`api-response.ts`）。
+
+#### 模块级类型（模块私有）
+
+**仅服务于某一个业务模块**、不会被其他模块复用的数据结构，放在该模块自己的 `types/` 目录下（如 `modules/<模块名>/types/`）：
+
+- 目录结构遵循与根 `types/` 相同的约定：在 `modules/<模块名>/types/` 下按业务域建 `.ts` 文件，并用 `index.ts` 聚合导出。
+  - 例：`modules/st/types/bookmark-view.ts` + `modules/st/types/index.ts`。
+- 模块内部通过**相对路径**引入，例如 `import type { X } from "./types"`，不引入到根 `types/`。
+- 模块级类型**默认不外溢**到根 `types/`；只有当确认需要跨模块复用时，才提升到根 `types/` 作为公共类型。
 
 ### 4. 生成代码后必须检查 TypeScript 报错
 
@@ -74,5 +89,7 @@ npm run type-check
 - [ ] 导出 / 异步 / 复杂函数是否标注了返回值类型？
 - [ ] 是否避免了隐式 `any` 与裸 `any`？
 - [ ] 共享数据结构是否定义为 `interface` / `type`？
-- [ ] 新类型是否已通过 `types/index.ts` 统一导出、使用方从统一入口引入？
+- [ ] 公共类型是否放在根 `types/` 下并通过 `types/index.ts` 统一导出？
+- [ ] 模块私有类型是否放在 `modules/<模块>/types/` 下，未外溢到根 `types/`？
+- [ ] 使用方是否从统一入口引入（公共用 `@/types`，模块内用 `./types`）？
 - [ ] 生成代码后是否运行 `tsc --noEmit` 且无报错？

@@ -1,5 +1,5 @@
 ---
-description: 禁止在代码中直接使用魔法值，所有常量必须抽取到 constants 目录下对应模块的 ts 文件中，并在 constants/index.ts 统一导出
+description: 禁止在代码中直接使用魔法值；项目公共常量放根 constants/ 并统一导出（从 @/constants 引入），仅服务于某模块的私有常量放 modules/<模块>/constants/ 下（模块内相对引入）
 globs: **/*.ts,**/*.tsx,**/*.vue,**/*.js,**/*.jsx
 alwaysApply: true
 ---
@@ -24,9 +24,15 @@ alwaysApply: true
 
 ## 存放规范
 
+常量按**作用域**分为两类，分别存放在不同位置：
+
+### 公共常量（项目级）
+
+跨模块复用、或语义上属于整个项目的常量，放在**项目根目录的 `constants/`** 下：
+
 1. 在 `constants/` 目录下，按**业务域 / 功能模块**新建对应的 `.ts` 模块文件。
    - 文件名使用 `kebab-case`，例如 `user-status.ts`、`api-timeout.ts`、`error-code.ts`。
-   - 每个模块只放同一领域的常量，保持高内聚。
+   - 每个文件只放同一领域的常量，保持高内聚。
 2. 常量使用 `const` / `as const` 定义，并加 `export`。
    - 推荐使用 `as const` 或 `Object.freeze` 保证不可变。
    - 相关常量建议聚合为对象，提升可读性，例如：
@@ -44,7 +50,17 @@ alwaysApply: true
    export * from "./api-timeout";
    export * from "./error-code";
    ```
-4. 使用方通过 `import { USER_STATUS } from "@/constants"`（或项目相对路径）引入，**禁止**从子模块路径直接散落引用（除非项目另有统一约定）。
+4. 使用方通过 `import { USER_STATUS } from "@/constants"` 引入，**禁止**从子模块路径（如 `@/constants/user-status`）直接散落引用。
+5. 模块内部若需复用根 `constants` 中的公共常量，同样从 `@/constants` 统一入口引入，**不要**在模块内重复定义。
+
+### 模块级常量（模块私有）
+
+**仅服务于某一个业务模块**、不会被其他模块复用的常量，放在该模块自己的 `constants/` 目录下（如 `modules/<模块名>/constants/`）：
+
+1. 目录结构遵循与根 `constants/` 相同的约定：在 `modules/<模块名>/constants/` 下按业务域建 `.ts` 文件，并用 `index.ts` 聚合导出。
+   - 例：`modules/st/constants/bookmark.ts` + `modules/st/constants/index.ts`。
+2. 模块内部通过**相对路径**引入，例如 `import { SOME_CONST } from "./constants"`，不引用到根 `constants/`。
+3. 模块级常量**默认不外溢**到根 `constants/`；只有当确认需要跨模块复用时，才提升到根 `constants/` 作为公共常量。
 
 ## 示例
 
@@ -85,7 +101,8 @@ const list = await fetchUsers({ pageSize: PAGE_CONFIG.USER_PAGE_SIZE });
 ## 检查清单
 
 - [ ] 业务判断中的数字 / 字符串字面量是否已抽取为常量？
-- [ ] 常量是否放在 `constants/` 下对应业务模块文件中（非散落在业务代码）？
+- [ ] 公共常量是否放在根 `constants/` 下对应业务模块文件中（非散落在业务代码）？
+- [ ] 模块私有常量是否放在 `modules/<模块>/constants/` 下，未外溢到根 `constants/`？
 - [ ] 常量是否已通过 `export` 暴露？
-- [ ] 新模块是否已在 `constants/index.ts` 中统一导出？
-- [ ] 使用处是否从统一入口引入？
+- [ ] 新常量是否已在 `constants/index.ts`（公共）或模块 `constants/index.ts`（私有）中统一导出？
+- [ ] 使用处是否从统一入口引入（公共用 `@/constants`，模块内用 `./constants`）？

@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { SERVER_PORT } from "@/constants";
+import { SERVER_PORT } from "./constants";
 import { renderDocument } from "./app";
 
 /**
