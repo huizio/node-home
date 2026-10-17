@@ -122,6 +122,7 @@ export class LiveStatusService {
       console.error("[live] 读取书签失败：", err instanceof Error ? err.message : err);
       return;
     }
+    console.log(`[live] 主调度完成：发现 ${bookmarks.length} 个 live 书签，待处理队列已刷新。`);
 
     const seen = new Set<string>();
     for (const bm of bookmarks) {
@@ -161,6 +162,7 @@ export class LiveStatusService {
     if (!row) {
       return;
     }
+    console.log(`[live] 开始处理书签：${row.name} <${bm.url}>`);
     row.state = "pending";
     this.broadcast();
 
@@ -172,13 +174,18 @@ export class LiveStatusService {
         row.status = status;
         row.fetchedAt = Date.now();
         row.error = undefined;
+        console.log(
+          `[live] 书签处理成功：${row.name} | 在线=${status.isOnline} 屏蔽=${status.isBlocked} 状态="${status.offlineStatus}" 更新时间=${status.offlineStatusUpdatedAt}`,
+        );
       } else {
         row.state = "notfound";
         row.error = "页面中未找到 offlineStatusUpdatedAt";
+        console.warn(`[live] 书签未找到状态：${row.name} <${bm.url}>（页面中无 offlineStatusUpdatedAt）`);
       }
     } catch (err) {
       row.state = "error";
       row.error = err instanceof Error ? err.message : String(err);
+      console.error(`[live] 书签处理失败：${row.name} <${bm.url}>`, err instanceof Error ? err.message : err);
     }
     this.broadcast();
   }
