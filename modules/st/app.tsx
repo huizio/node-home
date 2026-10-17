@@ -1,19 +1,82 @@
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { LiveBookmarkRow } from "./types";
 
-/** 表格单元格统一样式，避免逐个单元格重复书写。 */
-const cellStyle: CSSProperties = {
-  border: "1px solid #ddd",
-  padding: "8px 12px",
-  textAlign: "left",
-};
+/** 标签（badge）配色类型：green=绿、gray=灰、red=红。 */
+type BadgeKind = "green" | "gray" | "red";
 
-/**
- * 计算书签行的状态展示文案（与前端 SSE 脚本保持一致的逻辑，用于首屏 SSR）。
- * @param row 表格行数据
- * @returns 给「状态」列展示的中文文案
- */
+/** Apple 风格页面样式（系统字体、圆角卡片、细分隔线、胶囊标签）。 */
+const PAGE_CSS = `
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: #f5f5f7;
+  color: #1d1d1f;
+  padding: 32px;
+}
+.page-title { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 4px; }
+.page-sub { color: #6e6e73; font-size: 14px; margin: 0 0 20px; }
+.card {
+  background: #fff;
+  border-radius: 18px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+  padding: 20px 24px;
+}
+.controls { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.control-label { font-size: 14px; color: #1d1d1f; }
+.control-divider { width: 1px; height: 18px; background: #d2d2d7; }
+.switch { position: relative; display: inline-block; width: 46px; height: 28px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider {
+  position: absolute; cursor: pointer; inset: 0;
+  background: #e8e8ed; border-radius: 999px; transition: background 0.25s;
+}
+.slider:before {
+  content: ""; position: absolute; height: 24px; width: 24px; left: 2px; top: 2px;
+  background: #fff; border-radius: 50%; transition: transform 0.25s;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+.switch input:checked + .slider { background: #34c759; }
+.switch input:checked + .slider:before { transform: translateX(18px); }
+.interval-input {
+  width: 64px; height: 30px; border: 1px solid #d2d2d7; border-radius: 8px;
+  padding: 0 10px; font-size: 14px; outline: none;
+}
+.interval-input:focus { border-color: #0071e3; }
+table { width: 100%; border-collapse: collapse; }
+thead th {
+  text-align: left; font-size: 12px; font-weight: 600; color: #6e6e73;
+  padding: 10px 14px; border-bottom: 1px solid #d2d2d7; background: #fafafa;
+}
+thead th:first-child { border-top-left-radius: 10px; }
+thead th:last-child { border-top-right-radius: 10px; }
+tbody td {
+  padding: 12px 14px; font-size: 14px; border-bottom: 1px solid #f0f0f2;
+  vertical-align: middle;
+}
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover { background: #fafafa; }
+.ellipsis {
+  display: inline-block; max-width: 220px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;
+}
+.status-ellipsis { max-width: 280px; }
+.avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; background: #f0f0f2; }
+.badge {
+  display: inline-block; padding: 3px 12px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; line-height: 1.4;
+}
+.badge-green { background: rgba(52, 199, 89, 0.15); color: #1a8a3a; }
+.badge-gray { background: #e8e8ed; color: #6e6e73; }
+.badge-red { background: rgba(255, 59, 48, 0.15); color: #d70015; }
+.link { color: #0071e3; text-decoration: none; }
+.link:hover { text-decoration: underline; }
+.empty { text-align: center; color: #86868b; padding: 40px 0; }
+`;
+
+/** 计算书签行的状态展示文案（首屏 SSR 与前端脚本共用逻辑）。 */
 function statusText(row: LiveBookmarkRow): string {
   if (row.state === "error") return `错误: ${row.error ?? ""}`;
   if (row.state === "notfound") return "未找到状态";
@@ -22,65 +85,106 @@ function statusText(row: LiveBookmarkRow): string {
   return row.status.isOnline ? "直播中" : `离线: ${row.status.offlineStatus}`;
 }
 
-/** 单行展示组件。 */
+/** 将 ISO 时间格式化为 UTC+8（北京时区）可读字符串。 */
+function formatTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false });
+}
+
+/** 单个胶囊标签。 */
+function Badge({ kind, text }: { kind: BadgeKind; text: string }): ReactNode {
+  return <span className={`badge badge-${kind}`}>{text}</span>;
+}
+
+/** 单行展示组件（首屏 SSR 用，与前端脚本渲染保持一致）。 */
 function Row({ row }: { row: LiveBookmarkRow }): ReactNode {
   const st = row.status;
   const avatar = st?.avatarUrlThumb || st?.avatarUrl || "";
+  const onlineBadge = st ? (
+    <Badge kind={st.isOnline ? "green" : "gray"} text={st.isOnline ? "在线" : "离线"} />
+  ) : (
+    <Badge kind="gray" text="-" />
+  );
+  const blockBadge = st ? (
+    <Badge kind={st.isBlocked ? "red" : "gray"} text={st.isBlocked ? "已屏蔽" : "正常"} />
+  ) : (
+    <Badge kind="gray" text="-" />
+  );
+  const statusStr = statusText(row);
   return (
     <tr key={row.id}>
-      <td style={cellStyle}>{row.name}</td>
-      <td style={cellStyle}>
-        <a href={row.url} target="_blank" rel="noopener">{row.url}</a>
+      <td>
+        <span className="ellipsis" title={row.name}>{row.name}</span>
       </td>
-      <td style={cellStyle}>
-        {avatar ? (
-          <img src={avatar} width={40} height={40} style={{ borderRadius: "50%" }} alt="avatar" />
-        ) : null}
+      <td>
+        <a className="link" href={row.url} target="_blank" rel="noopener">{row.url}</a>
       </td>
-      <td style={cellStyle}>{st?.isOnline ? "在线" : st ? "离线" : "-"}</td>
-      <td style={cellStyle}>{st?.isBlocked ? "已屏蔽" : st ? "正常" : "-"}</td>
-      <td style={cellStyle}>{statusText(row)}</td>
-      <td style={cellStyle}>{st?.offlineStatusUpdatedAt ?? ""}</td>
+      <td>{avatar ? <img className="avatar" src={avatar} alt="avatar" /> : null}</td>
+      <td>{onlineBadge}</td>
+      <td>{blockBadge}</td>
+      <td>
+        <span className="ellipsis status-ellipsis" title={statusStr}>{statusStr}</span>
+      </td>
+      <td>{st?.offlineStatusUpdatedAt ? formatTime(st.offlineStatusUpdatedAt) : ""}</td>
     </tr>
   );
 }
 
 /**
- * 首页根组件：接收书签状态行并渲染为表格，并内嵌 SSE 客户端脚本实时刷新。
- * @param rows 首屏渲染所用的书签状态行（之后由 SSE 增量更新）
+ * 首页根组件：渲染控制条（自动刷新开关 + 间隔输入）与状态表格。
+ * 实际数据由前端脚本定时轮询 /api/status 刷新，开关与间隔持久化在 localStorage。
+ * @param rows 首屏渲染所用的书签状态行（之后由前端轮询覆盖）
  */
 export function App({ rows }: { rows: LiveBookmarkRow[] }): ReactNode {
   return (
-    <div style={{ fontFamily: "system-ui, sans-serif", padding: "2rem" }}>
-      <h1>Live 状态监控</h1>
-      <p style={{ color: "#666" }}>
-        每 30 秒扫描 live 目录书签，逐个（每秒一个）抓取直播间状态，通过 SSE 实时刷新。
+    <div>
+      <h1 className="page-title">Live 状态监控</h1>
+      <p className="page-sub">
+        每 30 秒扫描 live 目录书签，逐个（每秒一个）抓取直播间状态；下方可开启自动刷新。
       </p>
-      <table style={{ borderCollapse: "collapse", width: "100%" }}>
-        <thead>
-          <tr>
-            <th style={cellStyle}>名称</th>
-            <th style={cellStyle}>地址</th>
-            <th style={cellStyle}>头像</th>
-            <th style={cellStyle}>在线</th>
-            <th style={cellStyle}>屏蔽</th>
-            <th style={cellStyle}>状态</th>
-            <th style={cellStyle}>更新时间</th>
-          </tr>
-        </thead>
-        <tbody id="rows">
-          {rows.map((row) => (
-            <Row key={row.id} row={row} />
-          ))}
-        </tbody>
-      </table>
-      <script dangerouslySetInnerHTML={{ __html: SSE_CLIENT_SCRIPT }} />
+      <div className="card">
+        <div className="controls">
+          <label className="switch">
+            <input type="checkbox" id="autoToggle" />
+            <span className="slider" />
+          </label>
+          <span className="control-label">自动刷新</span>
+          <span className="control-divider" />
+          <span className="control-label">间隔</span>
+          <input type="number" id="intervalInput" className="interval-input" min={1} step={1} defaultValue={3} />
+          <span className="control-label">秒</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>名称</th>
+              <th>地址</th>
+              <th>头像</th>
+              <th>在线</th>
+              <th>屏蔽</th>
+              <th>状态</th>
+              <th>更新时间</th>
+            </tr>
+          </thead>
+          <tbody id="rows">
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="empty">暂无书签数据</td>
+              </tr>
+            ) : (
+              rows.map((row) => <Row key={row.id} row={row} />)
+            )}
+          </tbody>
+        </table>
+      </div>
+      <script dangerouslySetInnerHTML={{ __html: CLIENT_SCRIPT }} />
     </div>
   );
 }
 
 /**
- * 读取书签状态行，并渲染为完整 HTML 文档字符串（含 <!DOCTYPE> 与 <head>）。
+ * 读取书签状态行，并渲染为完整 HTML 文档字符串（含 <!DOCTYPE>、<head> 与 Apple 风格样式）。
  * @param rows 当前书签状态行（来自 LiveStatusService 的快照）
  * @returns 完整的 HTML 文本，可直接通过 res.end() 返回
  */
@@ -92,25 +196,39 @@ export function renderDocument(rows: LiveBookmarkRow[]): string {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Live 状态监控</title>
+  <style>${PAGE_CSS}</style>
 </head>
 <body>${body}</body>
 </html>`;
 }
 
 /**
- * SSE 客户端脚本：连接 /api/events，收到 snapshot / update 事件后用最新数据
- * 重建表格 tbody。使用字符串拼接而非模板字面量以避免与外层脚本冲突，
- * 并对外部站点数据做 HTML 转义，防止 XSS。
+ * 前端轮询脚本：连接 /api/status 拉取最新状态并重建表格。
+ * 自动刷新开关与轮询间隔保存在 localStorage（默认开启、间隔 3 秒）。
+ * 使用字符串拼接而非模板字面量以避免与外层脚本冲突；对外部数据做 HTML 转义防 XSS。
  */
-const SSE_CLIENT_SCRIPT = `
+const CLIENT_SCRIPT = `
 (function () {
   var tbody = document.getElementById('rows');
+  var autoKey = 'liveAutoRefresh';
+  var intKey = 'liveRefreshInterval';
+  var auto = localStorage.getItem(autoKey);
+  auto = auto === null ? true : auto === '1';
+  var interval = parseInt(localStorage.getItem(intKey) || '', 10);
+  if (isNaN(interval) || interval < 1) interval = 3;
+  var timer = null;
+  var toggle = document.getElementById('autoToggle');
+  var intInput = document.getElementById('intervalInput');
+  toggle.checked = auto;
+  intInput.value = interval;
+
   function esc(s) {
     return String(s == null ? '' : s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function badge(kind, text) {
+    return '<span class="badge badge-' + kind + '">' + esc(text) + '</span>';
   }
   function statusText(r) {
     if (r.state === 'error') return '错误: ' + r.error;
@@ -119,32 +237,75 @@ const SSE_CLIENT_SCRIPT = `
     if (!r.status) return '-';
     return r.status.isOnline ? '直播中' : ('离线: ' + r.status.offlineStatus);
   }
+  function formatTime(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    try {
+      return d.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+    } catch (e) {
+      return iso;
+    }
+  }
   function render(rows) {
+    if (!rows || !rows.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">暂无书签数据</td></tr>';
+      return;
+    }
     var html = '';
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i];
       var st = r.status || {};
       var avatar = st.avatarUrlThumb || st.avatarUrl || '';
-      var avatarCell = avatar
-        ? '<img src="' + esc(avatar) + '" width="40" height="40" style="border-radius:50%" alt="avatar" />'
-        : '';
-      var online = st.isOnline ? '在线' : (r.status ? '离线' : '-');
-      var blocked = st.isBlocked ? '已屏蔽' : (r.status ? '正常' : '-');
+      var avatarCell = avatar ? '<img class="avatar" src="' + esc(avatar) + '" alt="avatar" />' : '';
+      var onlineKind = st.isOnline ? 'green' : 'gray';
+      var blockKind = st.isBlocked ? 'red' : 'gray';
+      var onlineBadge = st.isOnline !== undefined ? badge(onlineKind, st.isOnline ? '在线' : '离线') : badge('gray', '-');
+      var blockBadge = st.isBlocked !== undefined ? badge(blockKind, st.isBlocked ? '已屏蔽' : '正常') : badge('gray', '-');
+      var statusStr = statusText(r);
       html +=
         '<tr>' +
-        '<td>' + esc(r.name) + '</td>' +
-        '<td><a href="' + esc(r.url) + '" target="_blank" rel="noopener">' + esc(r.url) + '</a></td>' +
+        '<td><span class="ellipsis" title="' + esc(r.name) + '">' + esc(r.name) + '</span></td>' +
+        '<td><a class="link" href="' + esc(r.url) + '" target="_blank" rel="noopener">' + esc(r.url) + '</a></td>' +
         '<td>' + avatarCell + '</td>' +
-        '<td>' + online + '</td>' +
-        '<td>' + blocked + '</td>' +
-        '<td>' + esc(statusText(r)) + '</td>' +
-        '<td>' + esc(st.offlineStatusUpdatedAt || '') + '</td>' +
+        '<td>' + onlineBadge + '</td>' +
+        '<td>' + blockBadge + '</td>' +
+        '<td><span class="ellipsis status-ellipsis" title="' + esc(statusStr) + '">' + esc(statusStr) + '</span></td>' +
+        '<td>' + esc(formatTime(st.offlineStatusUpdatedAt)) + '</td>' +
         '</tr>';
     }
     tbody.innerHTML = html;
   }
-  var es = new EventSource('/api/events');
-  es.addEventListener('snapshot', function (e) { render(JSON.parse(e.data).rows); });
-  es.addEventListener('update', function (e) { render(JSON.parse(e.data).rows); });
+  function poll() {
+    fetch('/api/status')
+      .then(function (r) { return r.json(); })
+      .then(function (data) { render(data.rows || []); })
+      .catch(function (e) { console.error('轮询失败', e); });
+  }
+  function start() {
+    stop();
+    if (toggle.checked) {
+      timer = setInterval(poll, interval * 1000);
+    }
+  }
+  function stop() {
+    if (timer) { clearInterval(timer); timer = null; }
+  }
+  toggle.addEventListener('change', function () {
+    localStorage.setItem(autoKey, toggle.checked ? '1' : '0');
+    if (toggle.checked) poll();
+    start();
+  });
+  intInput.addEventListener('change', function () {
+    var v = parseInt(intInput.value, 10);
+    if (isNaN(v) || v < 1) v = 3;
+    interval = v;
+    intInput.value = String(v);
+    localStorage.setItem(intKey, String(v));
+    start();
+  });
+  // 首屏已有 SSR 内容；立即拉一次最新数据，并按开关决定是否定时轮询。
+  poll();
+  if (auto) start();
 })();
 `;

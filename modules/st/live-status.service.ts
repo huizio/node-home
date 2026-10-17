@@ -1,9 +1,8 @@
-import type { IncomingMessage, ServerResponse } from "node:http";
 import { ProxyAgent, setGlobalDispatcher } from "undici";
 import { EdgeBookmarkReader } from "@/utils/edge-bookmark";
 import { TaskQueue } from "@/utils/task-queue";
 import type { Bookmark } from "@/types";
-import type { LiveBookmarkRow, LiveRoomStatus, LiveSnapshot } from "./types";
+import type { LiveBookmarkRow, LiveRoomStatus } from "./types";
 import {
   LIVE_BOOKMARK_PROCESS_INTERVAL_MS,
   LIVE_FOLDER_NAME,
@@ -25,15 +24,9 @@ interface FetchResponse {
   text(): Promise<string>;
 }
 
-/** SSE 事件名：首屏快照与后续增量更新共用同一数据格式。 */
-const SSE_EVENT_SNAPSHOT = "snapshot" as const;
-const SSE_EVENT_UPDATE = "update" as const;
-/** SSE 心跳间隔（毫秒）：保活，避免代理断开空闲连接。 */
-const SSE_HEARTBEAT_INTERVAL_MS = 15000 as const;
-
 /**
  * Live 状态采集服务：以任务队列驱动「每 30 秒扫描一次书签目录、每秒处理一个书签」，
- * 抓取各直播站点的内嵌状态并通过 SSE 实时推送给前端表格。
+ * 抓取各直播站点的内嵌状态并缓存在内存中，供前端轮询 /api/status 获取。
  */
 export class LiveStatusService {
   /** 书签读取器（读取 Edge 书签文件中 live 目录的直接书签）。 */
@@ -44,8 +37,6 @@ export class LiveStatusService {
   private pending: Bookmark[] = [];
   /** 书签 id -> 表格行数据（最新抓取结果）。 */
   private readonly rows = new Map<string, LiveBookmarkRow>();
-  /** SSE 订阅者集合（每个连接对应一个 ServerResponse）。 */
-  private readonly subscribers = new Set<ServerResponse>();
 
   /** 启动服务：配置代理（若设置）、注册两个定时任务并开启调度。 */
   start(): void {
@@ -99,38 +90,9 @@ export class LiveStatusService {
     }
   }
 
-  /** 当前全部表格行数据（供首屏 SSR 使用）。 */
+  /** 当前全部表格行数据（供首屏 SSR 与 /api/status 轮询使用）。 */
   getRows(): LiveBookmarkRow[] {
     return [...this.rows.values()];
-  }
-
-  /**
-   * 处理一次 SSE 连接：写入响应头、发送首屏快照，并在连接关闭时清理。
-   * @param _req 入站请求（当前未使用，预留扩展）
-   * @param res  服务端响应对象
-   */
-  handleSse(_req: IncomingMessage, res: ServerResponse): void {
-    res.writeHead(200, {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-      "Access-Control-Allow-Origin": "*",
-    });
-    // 客户端断线后 3 秒自动重连
-    res.write("retry: 3000\n\n");
-    // 立即推送当前快照
-    res.write(this.toSseMessage(SSE_EVENT_SNAPSHOT, { rows: this.getRows() }));
-    this.subscribers.add(res);
-
-    // 心跳保活
-    const heartbeat = setInterval(() => {
-      res.write(": ping\n\n");
-    }, SSE_HEARTBEAT_INTERVAL_MS);
-
-    res.on("close", () => {
-      clearInterval(heartbeat);
-      this.subscribers.delete(res);
-    });
   }
 
   /**
@@ -173,7 +135,6 @@ export class LiveStatusService {
     }
     // 重建待处理队列（本轮需要逐个抓取的完整列表）
     this.pending = [...bookmarks];
-    this.broadcast();
   }
 
   /** 处理任务：从待处理队列取出一个书签并抓取其直播间状态。 */
@@ -188,7 +149,6 @@ export class LiveStatusService {
     }
     console.log(`[live] 开始处理书签：${row.name} <${bm.url}>`);
     row.state = "pending";
-    this.broadcast();
 
     try {
       const html = await this.fetchLiveHtml(bm.url);
@@ -211,7 +171,6 @@ export class LiveStatusService {
       row.error = err instanceof Error ? err.message : String(err);
       console.error(`[live] 书签处理失败：${row.name} <${bm.url}>`, err instanceof Error ? err.message : err);
     }
-    this.broadcast();
   }
 
   /**
@@ -234,22 +193,6 @@ export class LiveStatusService {
       throw new Error(`非 HTML 文档：${contentType || "unknown"}`);
     }
     return res.text();
-  }
-
-  /** 向所有 SSE 订阅者广播当前快照。 */
-  private broadcast(): void {
-    if (this.subscribers.size === 0) {
-      return;
-    }
-    const message = this.toSseMessage(SSE_EVENT_UPDATE, { rows: this.getRows() });
-    for (const res of this.subscribers) {
-      res.write(message);
-    }
-  }
-
-  /** 将数据序列化为一条 SSE 消息（含事件名与 JSON 负载）。 */
-  private toSseMessage(event: string, payload: LiveSnapshot): string {
-    return `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
   }
 }
 
