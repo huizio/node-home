@@ -1,0 +1,38 @@
+/** 直播书签所在目录名：读取「live」目录下的直接书签（不含子目录）。 */
+export const LIVE_FOLDER_NAME = "live" as const;
+
+/** 主调度间隔（毫秒）：每 30 秒重新发现一次 live 目录书签并刷新待处理队列。 */
+export const LIVE_SCRAPE_INTERVAL_MS = 30000 as const;
+
+/** 单个书签处理间隔（毫秒）：任务队列每秒处理一个书签。 */
+export const LIVE_BOOKMARK_PROCESS_INTERVAL_MS = 1000 as const;
+
+/**
+ * 请求直播站点时携带的请求头（模拟浏览器，避免被站点拦截）。
+ * 注意：accept-encoding 去掉了 zstd，因为 Node 内置 fetch（undici）暂不支持
+ * zstd 解码；保留其支持的 gzip / deflate / br，压缩仍由 fetch 自动解压。
+ */
+export const LIVE_REQUEST_HEADERS = {
+  accept:
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+  "accept-encoding": "gzip, deflate, br",
+  "accept-language": "zh-CN,zh;q=0.9",
+  "cache-control": "max-age=0",
+  priority: "u=0, i",
+  "sec-ch-ua": '"Google Chrome";v="155", "Chromium";v="155", "Not(A:Brand";v="24"',
+  "sec-ch-ua-mobile": "?0",
+  "sec-ch-ua-platform": '"Windows"',
+  "sec-fetch-dest": "document",
+  "sec-fetch-mode": "navigate",
+  "sec-fetch-site": "none",
+  "sec-fetch-user": "?1",
+  "upgrade-insecure-requests": "1",
+  "user-agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+} as const;
+
+/**
+ * 请求时携带的 Cookie。当前为空，请按需填入站点登录态 Cookie
+ *（抓某些站点时缺少登录态可能返回非预期内容）。
+ */
+export const LIVE_REQUEST_COOKIE = "" as const;
