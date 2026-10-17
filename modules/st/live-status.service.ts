@@ -222,8 +222,9 @@ export class LiveStatusService {
 
 /**
  * 弹出 Windows 原生 Toast 通知（基于 Windows.UI.Notifications，无需第三方依赖）。
- * 将整段 PowerShell 脚本以 UTF-16LE 做 Base64 编码后通过 -EncodedCommand 传入，
- * 以规避标题 / 正文中的引号、换行等字符对命令行解析的干扰；再经 -Args 把文本传给脚本。
+ * 将整段 PowerShell 脚本以 UTF-16LE 做 Base64 编码后通过 -EncodedCommand 传入；
+ * -EncodedCommand 不能与 -Args 共用，故标题 / 正文经环境变量 TOAST_TITLE / TOAST_BODY
+ * 传入，规避引号、换行等字符对命令行解析的干扰。
  * @param title 通知标题
  * @param body  通知正文
  */
@@ -234,23 +235,19 @@ $ErrorActionPreference = 'SilentlyContinue'
 [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom, ContentType = WindowsRuntime] | Out-Null
 $template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
 $texts = $template.GetElementsByTagName('text')
-$texts.Item(0).AppendChild($template.CreateTextNode($args[0])) | Out-Null
-$texts.Item(1).AppendChild($template.CreateTextNode($args[1])) | Out-Null
+$texts.Item(0).AppendChild($template.CreateTextNode($env:TOAST_TITLE)) | Out-Null
+$texts.Item(1).AppendChild($template.CreateTextNode($env:TOAST_BODY)) | Out-Null
 $toast = [Windows.UI.Notifications.ToastNotification]::new($template)
 $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('${LIVE_NOTIFY_APP_ID}')
 $notifier.Show($toast)
 `;
   const encoded = Buffer.from(script, "utf16le").toString("base64");
   try {
-    await execFileAsync("powershell.exe", [
-      "-NoProfile",
-      "-NonInteractive",
-      "-EncodedCommand",
-      encoded,
-      "-Args",
-      title,
-      body,
-    ]);
+    await execFileAsync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+      { env: { ...process.env, TOAST_TITLE: title, TOAST_BODY: body } },
+    );
   } catch (err) {
     // 通知失败（如无桌面会话 / 权限受限）不影响主流程，仅记录日志。
     console.error("[live] Windows 通知发送失败：", err instanceof Error ? err.message : err);
