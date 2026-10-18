@@ -20,8 +20,6 @@ body {
   scrollbar-width: thin;
   scrollbar-color: #c7c7cc #f0f0f2;
 }
-/* 版心：内容区域最小宽度。窗口更窄时出现横向滚动，避免表格被过度挤压。 */
-.page { min-width: 1040px; }
 .page-title { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 4px; }
 .page-sub { color: #6e6e73; font-size: 14px; margin: 0 0 20px; }
 .card {
@@ -29,6 +27,8 @@ body {
   border-radius: 18px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
   padding: 20px 24px;
+  /* 窄屏时表格可在卡片内横向滚动，作为响应式兜底（不限制版心最小宽度）。 */
+  overflow-x: auto;
 }
 .switch { position: relative; display: inline-block; width: 46px; height: 28px; }
 .switch input { opacity: 0; width: 0; height: 0; }
@@ -51,20 +51,20 @@ body {
 .switch-sm input:checked + .slider:before { transform: translateX(16px); }
 table {
   width: 100%;
-  min-width: 1120px;
-  /* 固定布局：列宽由下方 nth-child 规则决定，内容溢出时走省略号而非撑开。 */
+  /* 固定布局 + 弹性列宽：窄列用固定像素、宽列用百分比，使表格填满视口而非固定最小宽度。 */
   table-layout: fixed;
   border-collapse: collapse;
 }
-/* 各列固定宽度（顺序与表头一致：名称/地址/头像/在线/屏蔽/状态/更新时间/通知）。 */
-table col.c-name { width: 160px; }
-table col.c-url { width: 260px; }
-table col.c-avatar { width: 56px; }
-table col.c-online { width: 80px; }
-table col.c-block { width: 80px; }
-table col.c-status { width: 220px; }
-table col.c-time { width: 180px; }
-table col.c-notify { width: 80px; }
+/* 各列宽度（顺序与表头一致：名称/地址/头像/在线/屏蔽/状态/更新时间/通知）。
+   小列用像素保底，大列用百分比随视口伸缩；内容溢出时走省略号而非撑开。 */
+table col.c-name { width: 20%; }
+table col.c-url { width: 32%; }
+table col.c-avatar { width: 48px; }
+table col.c-online { width: 64px; }
+table col.c-block { width: 64px; }
+table col.c-status { width: 24%; }
+table col.c-time { width: 130px; }
+table col.c-notify { width: 72px; }
 thead th {
   text-align: left; font-size: 12px; font-weight: 600; color: #6e6e73;
   padding: 10px 14px; border-bottom: 1px solid #d2d2d7; background: #fafafa;
@@ -76,6 +76,7 @@ tbody td {
   vertical-align: middle;
 }
 .cell-notify { text-align: center; }
+.cell-time { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover { background: #fafafa; }
 .ellipsis {
@@ -151,7 +152,7 @@ function Row({ row }: { row: LiveBookmarkRow }): ReactNode {
       <td>
         <span className="ellipsis status-ellipsis" title={statusStr}>{statusStr}</span>
       </td>
-      <td>{st?.offlineStatusUpdatedAt ? formatTime(st.offlineStatusUpdatedAt) : ""}</td>
+      <td className="cell-time">{st?.offlineStatusUpdatedAt ? formatTime(st.offlineStatusUpdatedAt) : ""}</td>
       <td className="cell-notify">
         <label className="switch switch-sm">
           <input type="checkbox" className="notify-switch" data-id={row.id} />
@@ -303,7 +304,7 @@ const CLIENT_SCRIPT = `
         '<td>' + onlineBadge + '</td>' +
         '<td>' + blockBadge + '</td>' +
         '<td><span class="ellipsis status-ellipsis" title="' + esc(statusStr) + '">' + esc(statusStr) + '</span></td>' +
-        '<td>' + esc(formatTime(st.offlineStatusUpdatedAt)) + '</td>' +
+        '<td class="cell-time">' + esc(formatTime(st.offlineStatusUpdatedAt)) + '</td>' +
         '<td class="cell-notify"><label class="switch switch-sm"><input type="checkbox" class="notify-switch" data-id="' + esc(r.id) + '"' + (notifyOn ? ' checked' : '') + '/><span class="slider"></span></label></td>' +
         '</tr>';
     }
