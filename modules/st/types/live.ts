@@ -42,3 +42,25 @@ export interface LiveSnapshot {
   /** 全部书签行 */
   rows: LiveBookmarkRow[];
 }
+
+/** 客户端发往服务端的 WebSocket 消息。 */
+export type ClientWsMessage = WsSetNotifyMessage;
+
+/** 客户端 -> 服务端：设置是否启用状态切换的桌面通知。 */
+export interface WsSetNotifyMessage {
+  /** 消息类型标识 */
+  type: "setNotify";
+  /** 是否启用通知 */
+  enabled: boolean;
+}
+
+/** 服务端发往客户端的 WebSocket 消息。 */
+export type ServerWsMessage = WsSnapshotMessage;
+
+/** 服务端 -> 客户端：全量状态快照（连接建立时与每次数据变更时推送）。 */
+export interface WsSnapshotMessage {
+  /** 消息类型标识 */
+  type: "snapshot";
+  /** 全部书签行 */
+  rows: LiveBookmarkRow[];
+}

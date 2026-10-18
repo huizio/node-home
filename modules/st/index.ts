@@ -1,8 +1,10 @@
 import { createServer } from "node:http";
 import type { ServerResponse } from "node:http";
-import { SERVER_PORT } from "./constants";
+import { LIVE_WS_PATH, SERVER_PORT } from "./constants";
 import { renderDocument } from "./app";
 import { LiveStatusService, showWindowsToast } from "./live-status.service";
+import { WebSocketHub } from "@/utils/ws-server";
+import type { ClientWsMessage, ServerWsMessage } from "./types";
 
 /**
  * 处理首屏页面请求：渲染当前书签状态行并以 text/html 返回。
@@ -22,20 +24,6 @@ async function handlePage(res: ServerResponse, service: LiveStatusService): Prom
 }
 
 /**
- * 处理状态轮询请求：返回当前全部书签状态行的 JSON 快照（供前端定时刷新）。
- * @param res 服务端响应对象
- * @param service 直播状态服务
- */
-function handleStatus(res: ServerResponse, service: LiveStatusService): void {
-  const payload = JSON.stringify({ rows: service.getRows() });
-  res.writeHead(200, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store",
-  });
-  res.end(payload);
-}
-
-/**
  * 优雅关闭：停止采集与 HTTP 服务，并发送关闭通知。
  * @param service 直播状态服务
  * @param server  HTTP 服务实例
@@ -48,18 +36,46 @@ async function shutdown(service: LiveStatusService, server: ReturnType<typeof cr
   process.exit(0);
 }
 
-/** 启动 HTTP 服务：提供首屏页面与状态轮询端点，并启动状态采集。 */
+/**
+ * 启动 HTTP 服务：提供首屏页面，并以 WebSocket 推送状态快照；
+ * 前端连接后上报通知开关，服务端据此决定是否弹窗通知。
+ */
 function setup(): void {
   const service = new LiveStatusService();
   service.start();
 
-  const server = createServer((req, res) => {
-    if (req.url?.startsWith("/api/status")) {
-      handleStatus(res, service);
-    } else {
-      void handlePage(res, service);
+  const server = createServer((_req, res) => {
+    void handlePage(res, service);
+  });
+
+  const hub = new WebSocketHub(LIVE_WS_PATH);
+  hub.attach(server);
+
+  // 新连接建立后立即推送一次全量快照（首屏之后的实时起点）。
+  hub.onConnection((client) => {
+    const msg: ServerWsMessage = { type: "snapshot", rows: service.getRows() };
+    client.send(JSON.stringify(msg));
+  });
+
+  // 处理客户端上行消息（如通知开关）。
+  hub.onMessage((_client, data) => {
+    let msg: ClientWsMessage;
+    try {
+      msg = JSON.parse(data) as ClientWsMessage;
+    } catch {
+      return;
+    }
+    if (msg.type === "setNotify") {
+      service.setNotifyEnabled(msg.enabled);
     }
   });
+
+  // 行数据变更时主动向所有客户端推送最新快照。
+  service.subscribe((rows) => {
+    const msg: ServerWsMessage = { type: "snapshot", rows };
+    hub.broadcast(JSON.stringify(msg));
+  });
+
   server.listen(SERVER_PORT, () => {
     console.log(`[st] server running at http://localhost:${SERVER_PORT}/`);
     // 服务启动成功后通知用户。

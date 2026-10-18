@@ -32,7 +32,7 @@ interface FetchResponse {
 
 /**
  * Live 状态采集服务：以任务队列驱动「每 30 秒扫描一次书签目录、每秒处理一个书签」，
- * 抓取各直播站点的内嵌状态并缓存在内存中，供前端轮询 /api/status 获取。
+ * 抓取各直播站点的内嵌状态并缓存在内存中，供首屏 SSR 与 WebSocket 快照推送使用。
  */
 export class LiveStatusService {
   /** 书签读取器（读取 Edge 书签文件中 live 目录的直接书签）。 */
@@ -43,6 +43,10 @@ export class LiveStatusService {
   private pending: Bookmark[] = [];
   /** 书签 id -> 表格行数据（最新抓取结果）。 */
   private readonly rows = new Map<string, LiveBookmarkRow>();
+  /** 行数据变更监听器（供 WebSocket 主动推送快照）。 */
+  private readonly changeListeners = new Set<(rows: LiveBookmarkRow[]) => void>();
+  /** 是否启用状态切换的桌面通知（由前端经 WebSocket 设置，默认关闭）。 */
+  private notifyEnabled = false;
 
   /** 启动服务：配置代理（若设置）、注册两个定时任务并开启调度。 */
   start(): void {
@@ -108,9 +112,35 @@ export class LiveStatusService {
     }
   }
 
-  /** 当前全部表格行数据（供首屏 SSR 与 /api/status 轮询使用）。 */
+  /** 当前全部表格行数据（供首屏 SSR 与 WebSocket 快照推送使用）。 */
   getRows(): LiveBookmarkRow[] {
     return [...this.rows.values()];
+  }
+
+  /**
+   * 订阅行数据变更，用于 WebSocket 主动推送快照。
+   * @param listener 数据变更时回调，入参为当前最新快照
+   * @returns 取消订阅函数
+   */
+  subscribe(listener: (rows: LiveBookmarkRow[]) => void): () => void {
+    this.changeListeners.add(listener);
+    return () => {
+      this.changeListeners.delete(listener);
+    };
+  }
+
+  /** 通知所有订阅者当前最新快照。 */
+  private emitChange(): void {
+    const rows = this.getRows();
+    for (const listener of this.changeListeners) {
+      listener(rows);
+    }
+  }
+
+  /** 设置是否启用状态切换的桌面通知（前端经 WebSocket 上报，默认关闭）。 */
+  setNotifyEnabled(enabled: boolean): void {
+    this.notifyEnabled = enabled;
+    console.log(`[live] 通知开关已${enabled ? "开启" : "关闭"}`);
   }
 
   /**
@@ -153,6 +183,8 @@ export class LiveStatusService {
     }
     // 重建待处理队列（本轮需要逐个抓取的完整列表）
     this.pending = [...bookmarks];
+    // 书签集合可能已增删，通知订阅者刷新快照。
+    this.emitChange();
   }
 
   /** 处理任务：从待处理队列取出一个书签并抓取其直播间状态。 */
@@ -181,8 +213,9 @@ export class LiveStatusService {
         console.log(
           `[live] 书签处理成功：${row.name} | 在线=${status.isOnline} 屏蔽=${status.isBlocked} 状态="${status.offlineStatus}" 更新时间=${status.offlineStatusUpdatedAt}`,
         );
-        // 仅在「成功抓取且在线状态发生切换」时通知；失败 / 首次抓取 / 状态未变均不通知。
-        if (prevOnline !== undefined && prevOnline !== status.isOnline) {
+        // 仅在「成功抓取、在线状态发生切换且用户开启了通知」时通知；
+        // 失败 / 首次抓取 / 状态未变 / 通知关闭均不通知。
+        if (prevOnline !== undefined && prevOnline !== status.isOnline && this.notifyEnabled) {
           void this.notifyStatusChange(row, status.isOnline);
         }
       } else {
@@ -195,6 +228,8 @@ export class LiveStatusService {
       row.error = err instanceof Error ? err.message : String(err);
       console.error(`[live] 书签处理失败：${row.name} <${bm.url}>`, err instanceof Error ? err.message : err);
     }
+    // 本行状态已更新，通知订阅者刷新快照（供 WebSocket 推送）。
+    this.emitChange();
   }
 
   /**

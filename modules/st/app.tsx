@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { LiveBookmarkRow } from "./types";
+import { LIVE_NOTIFY_STORAGE_KEY, LIVE_WS_PATH } from "./constants";
 
 /** 标签（badge）配色类型：green=绿、gray=灰、red=红。 */
 type BadgeKind = "green" | "gray" | "red";
@@ -31,7 +32,6 @@ body {
 }
 .controls { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
 .control-label { font-size: 14px; color: #1d1d1f; }
-.control-divider { width: 1px; height: 18px; background: #d2d2d7; }
 .switch { position: relative; display: inline-block; width: 46px; height: 28px; }
 .switch input { opacity: 0; width: 0; height: 0; }
 .slider {
@@ -45,11 +45,6 @@ body {
 }
 .switch input:checked + .slider { background: #34c759; }
 .switch input:checked + .slider:before { transform: translateX(18px); }
-.interval-input {
-  width: 64px; height: 30px; border: 1px solid #d2d2d7; border-radius: 8px;
-  padding: 0 10px; font-size: 14px; outline: none;
-}
-.interval-input:focus { border-color: #0071e3; }
 table {
   width: 100%;
   min-width: 1000px;
@@ -156,9 +151,9 @@ function Row({ row }: { row: LiveBookmarkRow }): ReactNode {
 }
 
 /**
- * 首页根组件：渲染控制条（自动刷新开关 + 间隔输入）与状态表格。
- * 实际数据由前端脚本定时轮询 /api/status 刷新，开关与间隔持久化在 localStorage。
- * @param rows 首屏渲染所用的书签状态行（之后由前端轮询覆盖）
+ * 首页根组件：渲染控制条（状态变更通知开关）与状态表格。
+ * 实际数据由前端经 WebSocket 实时推送刷新，通知开关持久化在 localStorage。
+ * @param rows 首屏渲染所用的书签状态行（之后由 WebSocket 推送覆盖）
  */
 export function App({ rows }: { rows: LiveBookmarkRow[] }): ReactNode {
   return (
@@ -168,14 +163,10 @@ export function App({ rows }: { rows: LiveBookmarkRow[] }): ReactNode {
       <div className="card">
         <div className="controls">
           <label className="switch">
-            <input type="checkbox" id="autoToggle" />
+            <input type="checkbox" id="notifyToggle" />
             <span className="slider" />
           </label>
-          <span className="control-label">自动刷新</span>
-          <span className="control-divider" />
-          <span className="control-label">间隔</span>
-          <input type="number" id="intervalInput" className="interval-input" min={1} step={1} defaultValue={3} />
-          <span className="control-label">秒</span>
+          <span className="control-label">状态变更通知</span>
         </div>
         <table>
           <colgroup>
@@ -234,24 +225,16 @@ export function renderDocument(rows: LiveBookmarkRow[]): string {
 }
 
 /**
- * 前端轮询脚本：连接 /api/status 拉取最新状态并重建表格。
- * 自动刷新开关与轮询间隔保存在 localStorage（默认开启、间隔 3 秒）。
- * 使用字符串拼接而非模板字面量以避免与外层脚本冲突；对外部数据做 HTML 转义防 XSS。
+ * 前端脚本：通过 WebSocket 接收服务端实时快照并重建表格，并维护「状态变更通知」开关。
+ * 开关默认关闭，持久化于 localStorage，连接建立或切换时经 WebSocket 上报服务端；
+ * 服务端据此（结合状态切换）决定是否弹窗。对外部数据做 HTML 转义防 XSS。
  */
 const CLIENT_SCRIPT = `
 (function () {
   var tbody = document.getElementById('rows');
-  var autoKey = 'liveAutoRefresh';
-  var intKey = 'liveRefreshInterval';
-  var auto = localStorage.getItem(autoKey);
-  auto = auto === null ? true : auto === '1';
-  var interval = parseInt(localStorage.getItem(intKey) || '', 10);
-  if (isNaN(interval) || interval < 1) interval = 3;
-  var timer = null;
-  var toggle = document.getElementById('autoToggle');
-  var intInput = document.getElementById('intervalInput');
-  toggle.checked = auto;
-  intInput.value = interval;
+  var notifyKey = '${LIVE_NOTIFY_STORAGE_KEY}';
+  var notifyToggle = document.getElementById('notifyToggle');
+  var ws = null;
 
   function esc(s) {
     return String(s == null ? '' : s)
@@ -307,36 +290,44 @@ const CLIENT_SCRIPT = `
     }
     tbody.innerHTML = html;
   }
-  function poll() {
-    fetch('/api/status')
-      .then(function (r) { return r.json(); })
-      .then(function (data) { render(data.rows || []); })
-      .catch(function (e) { console.error('轮询失败', e); });
-  }
-  function start() {
-    stop();
-    if (toggle.checked) {
-      timer = setInterval(poll, interval * 1000);
+
+  // 通知开关：默认关闭，持久化于 localStorage。
+  var notify = localStorage.getItem(notifyKey);
+  notify = notify === '1';
+  notifyToggle.checked = notify;
+  notifyToggle.addEventListener('change', function () {
+    localStorage.setItem(notifyKey, notifyToggle.checked ? '1' : '0');
+    sendNotify();
+  });
+
+  // 经 WebSocket 上报当前通知开关状态。
+  function sendNotify() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'setNotify', enabled: notifyToggle.checked }));
     }
   }
-  function stop() {
-    if (timer) { clearInterval(timer); timer = null; }
+
+  // 建立 WebSocket：接收快照渲染，断线后自动重连。
+  function connect() {
+    var proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    ws = new WebSocket(proto + location.host + '${LIVE_WS_PATH}');
+    ws.onmessage = function (ev) {
+      try {
+        var msg = JSON.parse(ev.data);
+        if (msg && msg.type === 'snapshot') render(msg.rows || []);
+      } catch (e) { /* 忽略非法消息 */ }
+    };
+    ws.onopen = function () {
+      // 连接建立后立即上报当前通知开关状态。
+      sendNotify();
+    };
+    ws.onclose = function () {
+      setTimeout(connect, 2000);
+    };
+    ws.onerror = function () {
+      ws.close();
+    };
   }
-  toggle.addEventListener('change', function () {
-    localStorage.setItem(autoKey, toggle.checked ? '1' : '0');
-    if (toggle.checked) poll();
-    start();
-  });
-  intInput.addEventListener('change', function () {
-    var v = parseInt(intInput.value, 10);
-    if (isNaN(v) || v < 1) v = 3;
-    interval = v;
-    intInput.value = String(v);
-    localStorage.setItem(intKey, String(v));
-    start();
-  });
-  // 首屏已有 SSR 内容；立即拉一次最新数据，并按开关决定是否定时轮询。
-  poll();
-  if (auto) start();
+  connect();
 })();
 `;

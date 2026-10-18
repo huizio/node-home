@@ -50,3 +50,9 @@ export const LIVE_REQUEST_COOKIE = "" as const;
  * 故需显式配置同源代理。可通过环境变量 LIVE_PROXY_URL 覆盖；留空则不使用代理直连。
  */
 export const LIVE_PROXY_URL = (process.env.LIVE_PROXY_URL ?? "http://127.0.0.1:10808") as string;
+
+/** WebSocket 通信路径：前端经此路径升级到 WebSocket，接收快照 / 上报通知开关。 */
+export const LIVE_WS_PATH = "/ws" as const;
+
+/** 通知开关在 localStorage 中的键名（默认关闭：缺失或 "0" 视为关闭）。 */
+export const LIVE_NOTIFY_STORAGE_KEY = "liveNotifyEnabled" as const;
