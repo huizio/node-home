@@ -15,12 +15,12 @@ body {
   background: #f5f5f7;
   color: #1d1d1f;
   padding: 32px;
-  /* 页面最小宽度：窗口更窄时出现横向滚动，避免表格被过度挤压。 */
-  min-width: 1040px;
   /* Firefox 滚动条美化（细窄 + 配色）。 */
   scrollbar-width: thin;
   scrollbar-color: #c7c7cc #f0f0f2;
 }
+/* 版心：内容区域最小宽度。窗口更窄时出现横向滚动，避免表格被过度挤压。 */
+.page { min-width: 1040px; }
 .page-title { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 4px; }
 .page-sub { color: #6e6e73; font-size: 14px; margin: 0 0 20px; }
 .card {
@@ -162,11 +162,9 @@ function Row({ row }: { row: LiveBookmarkRow }): ReactNode {
  */
 export function App({ rows }: { rows: LiveBookmarkRow[] }): ReactNode {
   return (
-    <div>
-      <h1 className="page-title">Live 状态监控</h1>
-      <p className="page-sub">
-        每 30 秒扫描 live 目录书签，逐个（每秒一个）抓取直播间状态；下方可开启自动刷新。
-      </p>
+    <div className="page">
+      <h1 className="page-title">状态监控</h1>
+
       <div className="card">
         <div className="controls">
           <label className="switch">
