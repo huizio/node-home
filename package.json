@@ -7,7 +7,8 @@
     "dev": "tsx watch index.ts",
     "start": "tsx index.ts",
     "type-check": "tsc --noEmit",
-    "build": "tsc"
+    "build": "tsc",
+    "build:exe": "node scripts/build-exe.mjs"
   },
   "keywords": [],
   "author": "",
@@ -15,6 +16,8 @@
   "type": "commonjs",
   "devDependencies": {
     "@types/node": "^26.6.5",
+    "esbuild": "^0.28.2",
+    "pkg": "^5.8.1",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3"
   },
@@ -24,5 +27,8 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "undici": "^6.29.1"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
   }
 }
