@@ -5,6 +5,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# pkg 构建期本地缓存（由 vendor/pkg-bin 下的预置二进制生成，不提交）
+vendor/.pkg-cache/
+
 # 日志
 *.log
 npm-debug.log*
