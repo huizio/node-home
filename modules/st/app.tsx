@@ -15,6 +15,11 @@ body {
   background: #f5f5f7;
   color: #1d1d1f;
   padding: 32px;
+  /* 页面最小宽度：窗口更窄时出现横向滚动，避免表格被过度挤压。 */
+  min-width: 1040px;
+  /* Firefox 滚动条美化（细窄 + 配色）。 */
+  scrollbar-width: thin;
+  scrollbar-color: #c7c7cc #f0f0f2;
 }
 .page-title { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 4px; }
 .page-sub { color: #6e6e73; font-size: 14px; margin: 0 0 20px; }
@@ -45,7 +50,21 @@ body {
   padding: 0 10px; font-size: 14px; outline: none;
 }
 .interval-input:focus { border-color: #0071e3; }
-table { width: 100%; border-collapse: collapse; }
+table {
+  width: 100%;
+  min-width: 1000px;
+  /* 固定布局：列宽由下方 nth-child 规则决定，内容溢出时走省略号而非撑开。 */
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+/* 各列固定宽度（顺序与表头一致：名称/地址/头像/在线/屏蔽/状态/更新时间）。 */
+table col.c-name { width: 160px; }
+table col.c-url { width: 260px; }
+table col.c-avatar { width: 56px; }
+table col.c-online { width: 80px; }
+table col.c-block { width: 80px; }
+table col.c-status { width: 220px; }
+table col.c-time { width: 180px; }
 thead th {
   text-align: left; font-size: 12px; font-weight: 600; color: #6e6e73;
   padding: 10px 14px; border-bottom: 1px solid #d2d2d7; background: #fafafa;
@@ -59,10 +78,10 @@ tbody td {
 tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover { background: #fafafa; }
 .ellipsis {
-  display: inline-block; max-width: 220px; overflow: hidden;
+  display: block; max-width: 100%; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;
 }
-.status-ellipsis { max-width: 280px; }
+.status-ellipsis { max-width: 100%; }
 .avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; background: #f0f0f2; }
 .badge {
   display: inline-block; padding: 3px 12px; border-radius: 999px;
@@ -74,6 +93,11 @@ tbody tr:hover { background: #fafafa; }
 .link { color: #0071e3; text-decoration: none; }
 .link:hover { text-decoration: underline; }
 .empty { text-align: center; color: #86868b; padding: 40px 0; }
+/* WebKit 滚动条美化（Chrome / Edge / Safari）：细圆角、hover 加深。 */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #f0f0f2; border-radius: 6px; }
+::-webkit-scrollbar-thumb { background: #c7c7cc; border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: #aeaeb2; }
 `;
 
 /** 计算书签行的状态展示文案（首屏 SSR 与前端脚本共用逻辑）。 */
@@ -156,6 +180,15 @@ export function App({ rows }: { rows: LiveBookmarkRow[] }): ReactNode {
           <span className="control-label">秒</span>
         </div>
         <table>
+          <colgroup>
+            <col className="c-name" />
+            <col className="c-url" />
+            <col className="c-avatar" />
+            <col className="c-online" />
+            <col className="c-block" />
+            <col className="c-status" />
+            <col className="c-time" />
+          </colgroup>
           <thead>
             <tr>
               <th>名称</th>
