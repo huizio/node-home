@@ -46,11 +46,13 @@ export interface LiveSnapshot {
 /** 客户端发往服务端的 WebSocket 消息。 */
 export type ClientWsMessage = WsSetNotifyMessage;
 
-/** 客户端 -> 服务端：设置是否启用状态切换的桌面通知。 */
+/** 客户端 -> 服务端：设置单个书签是否启用状态切换的桌面通知。 */
 export interface WsSetNotifyMessage {
   /** 消息类型标识 */
   type: "setNotify";
-  /** 是否启用通知 */
+  /** 目标书签行 id */
+  id: string;
+  /** 是否启用该书的通知 */
   enabled: boolean;
 }
 

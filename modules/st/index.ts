@@ -66,7 +66,7 @@ function setup(): void {
       return;
     }
     if (msg.type === "setNotify") {
-      service.setNotifyEnabled(msg.enabled);
+      service.setNotifyEnabled(msg.id, msg.enabled);
     }
   });
 

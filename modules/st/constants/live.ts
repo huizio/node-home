@@ -54,5 +54,5 @@ export const LIVE_PROXY_URL = (process.env.LIVE_PROXY_URL ?? "http://127.0.0.1:1
 /** WebSocket 通信路径：前端经此路径升级到 WebSocket，接收快照 / 上报通知开关。 */
 export const LIVE_WS_PATH = "/ws" as const;
 
-/** 通知开关在 localStorage 中的键名（默认关闭：缺失或 "0" 视为关闭）。 */
-export const LIVE_NOTIFY_STORAGE_KEY = "liveNotifyEnabled" as const;
+/** 逐行通知开关在 localStorage 中的键名（值为 id -> 是否启用的 JSON 映射）。 */
+export const LIVE_NOTIFY_STORAGE_KEY = "liveNotifyMap" as const;

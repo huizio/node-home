@@ -30,8 +30,6 @@ body {
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
   padding: 20px 24px;
 }
-.controls { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
-.control-label { font-size: 14px; color: #1d1d1f; }
 .switch { position: relative; display: inline-block; width: 46px; height: 28px; }
 .switch input { opacity: 0; width: 0; height: 0; }
 .slider {
@@ -45,14 +43,20 @@ body {
 }
 .switch input:checked + .slider { background: #34c759; }
 .switch input:checked + .slider:before { transform: translateX(18px); }
+/* 表格内嵌的紧凑开关（用于逐行通知控制）。 */
+.switch-sm { width: 36px; height: 20px; }
+.switch-sm .slider:before {
+  height: 16px; width: 16px; left: 2px; top: 2px;
+}
+.switch-sm input:checked + .slider:before { transform: translateX(16px); }
 table {
   width: 100%;
-  min-width: 1000px;
+  min-width: 1120px;
   /* 固定布局：列宽由下方 nth-child 规则决定，内容溢出时走省略号而非撑开。 */
   table-layout: fixed;
   border-collapse: collapse;
 }
-/* 各列固定宽度（顺序与表头一致：名称/地址/头像/在线/屏蔽/状态/更新时间）。 */
+/* 各列固定宽度（顺序与表头一致：名称/地址/头像/在线/屏蔽/状态/更新时间/通知）。 */
 table col.c-name { width: 160px; }
 table col.c-url { width: 260px; }
 table col.c-avatar { width: 56px; }
@@ -60,6 +64,7 @@ table col.c-online { width: 80px; }
 table col.c-block { width: 80px; }
 table col.c-status { width: 220px; }
 table col.c-time { width: 180px; }
+table col.c-notify { width: 80px; }
 thead th {
   text-align: left; font-size: 12px; font-weight: 600; color: #6e6e73;
   padding: 10px 14px; border-bottom: 1px solid #d2d2d7; background: #fafafa;
@@ -70,6 +75,7 @@ tbody td {
   padding: 12px 14px; font-size: 14px; border-bottom: 1px solid #f0f0f2;
   vertical-align: middle;
 }
+.cell-notify { text-align: center; }
 tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover { background: #fafafa; }
 .ellipsis {
@@ -146,13 +152,19 @@ function Row({ row }: { row: LiveBookmarkRow }): ReactNode {
         <span className="ellipsis status-ellipsis" title={statusStr}>{statusStr}</span>
       </td>
       <td>{st?.offlineStatusUpdatedAt ? formatTime(st.offlineStatusUpdatedAt) : ""}</td>
+      <td className="cell-notify">
+        <label className="switch switch-sm">
+          <input type="checkbox" className="notify-switch" data-id={row.id} />
+          <span className="slider" />
+        </label>
+      </td>
     </tr>
   );
 }
 
 /**
- * 首页根组件：渲染控制条（状态变更通知开关）与状态表格。
- * 实际数据由前端经 WebSocket 实时推送刷新，通知开关持久化在 localStorage。
+ * 首页根组件：渲染状态表格，每行带独立的「通知」开关（逐行控制是否弹窗）。
+ * 实际数据由前端经 WebSocket 实时推送刷新，逐行通知开关持久化在 localStorage。
  * @param rows 首屏渲染所用的书签状态行（之后由 WebSocket 推送覆盖）
  */
 export function App({ rows }: { rows: LiveBookmarkRow[] }): ReactNode {
@@ -161,13 +173,6 @@ export function App({ rows }: { rows: LiveBookmarkRow[] }): ReactNode {
       <h1 className="page-title">状态监控</h1>
 
       <div className="card">
-        <div className="controls">
-          <label className="switch">
-            <input type="checkbox" id="notifyToggle" />
-            <span className="slider" />
-          </label>
-          <span className="control-label">状态变更通知</span>
-        </div>
         <table>
           <colgroup>
             <col className="c-name" />
@@ -177,6 +182,7 @@ export function App({ rows }: { rows: LiveBookmarkRow[] }): ReactNode {
             <col className="c-block" />
             <col className="c-status" />
             <col className="c-time" />
+            <col className="c-notify" />
           </colgroup>
           <thead>
             <tr>
@@ -187,12 +193,13 @@ export function App({ rows }: { rows: LiveBookmarkRow[] }): ReactNode {
               <th>屏蔽</th>
               <th>状态</th>
               <th>更新时间</th>
+              <th>通知</th>
             </tr>
           </thead>
           <tbody id="rows">
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={7} className="empty">暂无书签数据</td>
+                <td colSpan={8} className="empty">暂无书签数据</td>
               </tr>
             ) : (
               rows.map((row) => <Row key={row.id} row={row} />)
@@ -225,16 +232,26 @@ export function renderDocument(rows: LiveBookmarkRow[]): string {
 }
 
 /**
- * 前端脚本：通过 WebSocket 接收服务端实时快照并重建表格，并维护「状态变更通知」开关。
- * 开关默认关闭，持久化于 localStorage，连接建立或切换时经 WebSocket 上报服务端；
- * 服务端据此（结合状态切换）决定是否弹窗。对外部数据做 HTML 转义防 XSS。
+ * 前端脚本：通过 WebSocket 接收服务端实时快照并重建表格，并维护逐行「通知」开关。
+ * 每行独立控制、默认关闭，开关状态以 id -> 是否启用 的映射持久化于 localStorage；
+ * 切换或连接建立时经 WebSocket 逐行上报服务端，服务端据此决定是否弹窗。对外部数据做 HTML 转义防 XSS。
  */
 const CLIENT_SCRIPT = `
 (function () {
   var tbody = document.getElementById('rows');
   var notifyKey = '${LIVE_NOTIFY_STORAGE_KEY}';
-  var notifyToggle = document.getElementById('notifyToggle');
   var ws = null;
+
+  // 逐行通知开关：id -> 是否启用的映射（默认全关）。
+  var notifyMap = {};
+  try {
+    notifyMap = JSON.parse(localStorage.getItem(notifyKey) || '{}') || {};
+  } catch (e) {
+    notifyMap = {};
+  }
+  function saveNotify() {
+    localStorage.setItem(notifyKey, JSON.stringify(notifyMap));
+  }
 
   function esc(s) {
     return String(s == null ? '' : s)
@@ -263,7 +280,7 @@ const CLIENT_SCRIPT = `
   }
   function render(rows) {
     if (!rows || !rows.length) {
-      tbody.innerHTML = '<tr><td colspan="7" class="empty">暂无书签数据</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" class="empty">暂无书签数据</td></tr>';
       return;
     }
     var html = '';
@@ -277,6 +294,7 @@ const CLIENT_SCRIPT = `
       var onlineBadge = st.isOnline !== undefined ? badge(onlineKind, st.isOnline ? '在线' : '离线') : badge('gray', '-');
       var blockBadge = st.isBlocked !== undefined ? badge(blockKind, st.isBlocked ? '已屏蔽' : '正常') : badge('gray', '-');
       var statusStr = statusText(r);
+      var notifyOn = notifyMap[r.id] === true;
       html +=
         '<tr>' +
         '<td><span class="ellipsis" title="' + esc(r.name) + '">' + esc(r.name) + '</span></td>' +
@@ -286,26 +304,29 @@ const CLIENT_SCRIPT = `
         '<td>' + blockBadge + '</td>' +
         '<td><span class="ellipsis status-ellipsis" title="' + esc(statusStr) + '">' + esc(statusStr) + '</span></td>' +
         '<td>' + esc(formatTime(st.offlineStatusUpdatedAt)) + '</td>' +
+        '<td class="cell-notify"><label class="switch switch-sm"><input type="checkbox" class="notify-switch" data-id="' + esc(r.id) + '"' + (notifyOn ? ' checked' : '') + '/><span class="slider"></span></label></td>' +
         '</tr>';
     }
     tbody.innerHTML = html;
   }
 
-  // 通知开关：默认关闭，持久化于 localStorage。
-  var notify = localStorage.getItem(notifyKey);
-  notify = notify === '1';
-  notifyToggle.checked = notify;
-  notifyToggle.addEventListener('change', function () {
-    localStorage.setItem(notifyKey, notifyToggle.checked ? '1' : '0');
-    sendNotify();
-  });
-
-  // 经 WebSocket 上报当前通知开关状态。
-  function sendNotify() {
+  // 更新某行的通知开关：本地映射 + 持久化 + 经 WebSocket 上报服务端。
+  function setNotify(id, enabled) {
+    if (enabled) notifyMap[id] = true;
+    else delete notifyMap[id];
+    saveNotify();
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'setNotify', enabled: notifyToggle.checked }));
+      ws.send(JSON.stringify({ type: 'setNotify', id: id, enabled: enabled }));
     }
   }
+
+  // 事件委托：表格内任意通知开关切换统一由 tbody 处理（innerHTML 重建后依然有效）。
+  tbody.addEventListener('change', function (e) {
+    var t = e.target;
+    if (t && t.classList && t.classList.contains('notify-switch')) {
+      setNotify(t.getAttribute('data-id'), t.checked);
+    }
+  });
 
   // 建立 WebSocket：接收快照渲染，断线后自动重连。
   function connect() {
@@ -318,8 +339,12 @@ const CLIENT_SCRIPT = `
       } catch (e) { /* 忽略非法消息 */ }
     };
     ws.onopen = function () {
-      // 连接建立后立即上报当前通知开关状态。
-      sendNotify();
+      // 连接建立后，将本地全部逐行通知开关上报服务端（覆盖重连后的服务端状态）。
+      for (var id in notifyMap) {
+        if (Object.prototype.hasOwnProperty.call(notifyMap, id)) {
+          ws.send(JSON.stringify({ type: 'setNotify', id: id, enabled: notifyMap[id] }));
+        }
+      }
     };
     ws.onclose = function () {
       setTimeout(connect, 2000);
